@@ -27,6 +27,14 @@ class Spec:
 
     bolt_extra_length_into_bottom: float = 13.0
 
+    antenna_body_width: float = 15.0
+    antenna_body_recess_depth: float = 2.0
+    antenna_hole_sep: float = 46
+    antenna_hole_peg_diameter: float = 5.0
+
+    zip_tie_slot_width: float = 8.0
+    zip_tie_slot_height: float = 4.0
+
     make_type: Literal["full", "top", "bottom"] = "full"
 
     def __post_init__(self) -> None:
@@ -45,16 +53,59 @@ def main_mount_joined(spec: Spec) -> bd.Part | bd.Compound:
     ).rotate(axis=bd.Axis.Y, angle=90)
 
     # Add the rotated mount plate for the antenna.
-    plate_mount = bd.Part() + bd.Box(
-        spec.general_width,
-        spec.bolt_separation - spec.bolt_diameter,
-        spec.bolt_separation / 2,
-        align=(
-            bd.Align.CENTER,
-            bd.Align.CENTER,
-            bd.Align.MIN,
-        ),
+    plate_mount = (
+        bd.Part()
+        + bd.Box(
+            spec.general_width,
+            spec.bolt_separation - spec.bolt_diameter,
+            spec.bolt_separation / 2,
+            align=(
+                bd.Align.CENTER,
+                bd.Align.CENTER,
+                bd.Align.MIN,
+            ),
+        )
+        - bd.Box(
+            spec.antenna_body_width,
+            500,
+            20,
+            align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN),
+        ).translate(
+            (0, 0, spec.bolt_separation / 2 - spec.antenna_body_recess_depth)
+        )
     )
+    # Add channel for antenna body, and pegs to mate with antenna body holes.
+    for i in (-1, 1):
+        plate_mount += (
+            bd.Cylinder(
+                radius=spec.antenna_hole_peg_diameter / 2,
+                height=2,
+                align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN),
+            )
+        ).translate(
+            (
+                0,
+                i * spec.antenna_hole_sep / 2,
+                spec.bolt_separation / 2 - spec.antenna_body_recess_depth,
+            )
+        )
+
+    # Add slots for zip ties to hold the antenna body in place.
+    for i in (-1, 1):
+        plate_mount -= (
+            bd.Box(
+                spec.antenna_body_width * 5,  # Arbitrary.
+                spec.zip_tie_slot_width,
+                spec.zip_tie_slot_height,
+                align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.CENTER),
+            )
+        ).translate(
+            (
+                0,
+                i * spec.antenna_hole_sep * 0.5,
+                spec.bolt_separation / 2 - spec.antenna_body_recess_depth - 5,
+            )
+        )
 
     # Add bolt holes part.
     for i in (-1, 1):
