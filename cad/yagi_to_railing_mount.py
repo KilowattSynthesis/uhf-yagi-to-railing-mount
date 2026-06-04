@@ -11,17 +11,17 @@ from loguru import logger
 class Spec:
     """Specification for main_mount."""
 
-    railing_width: float = 20  # Need to update!
-    railing_height: float = 15  # Need to update!
+    railing_width: float = 52
+    railing_height: float = 26.5
 
     general_width: float = 35
 
     antenna_elevation_angle_degrees: float = 40
 
     # Precise bolt diameter. Do not add clearance.
-    bolt_diameter: float = 6  # Need to update!
+    bolt_diameter: float = 5.0
     # Center-to-center distance between bolt holes.
-    bolt_separation: float = 50  # Need to update!
+    bolt_separation: float = 44
 
     bolt_diameter_clearance: float = 0.5  # Clearance for bolt holes.
 
@@ -109,8 +109,8 @@ def main_mount_joined(spec: Spec) -> bd.Part | bd.Compound:
 
 if __name__ == "__main__":
     parts = {
-        "main_mount_top": show(main_mount_joined(Spec(make_type="top"))),
-        "main_mount_bottom": show(main_mount_joined(Spec(make_type="bottom"))),
+        # "main_mount_top": (main_mount_joined(Spec(make_type="top"))),
+        # "main_mount_bottom": (main_mount_joined(Spec(make_type="bottom"))),
         "preview_main_mount_joined": show(main_mount_joined(Spec())),
     }
 
