@@ -21,9 +21,11 @@ class Spec:
     # Precise bolt diameter. Do not add clearance.
     bolt_diameter: float = 5.0
     # Center-to-center distance between bolt holes.
-    bolt_separation: float = 44
+    bolt_separation: float = 75
 
     bolt_diameter_clearance: float = 0.5  # Clearance for bolt holes.
+
+    bolt_extra_length_into_bottom: float = 13.0
 
     make_type: Literal["full", "top", "bottom"] = "full"
 
@@ -53,21 +55,49 @@ def main_mount_joined(spec: Spec) -> bd.Part | bd.Compound:
             bd.Align.MIN,
         ),
     )
+
+    # Add bolt holes part.
     for i in (-1, 1):
         plate_mount += bd.Cylinder(
             radius=spec.bolt_diameter / 2 + 3,
-            height=spec.bolt_separation / 2,
+            height=(spec.bolt_separation / 2),
             align=(
                 bd.Align.CENTER,
                 bd.Align.CENTER,
                 bd.Align.MIN,
             ),
-        ).translate((0, i * spec.bolt_separation / 2, 0))
+        ).translate(
+            (
+                0,
+                i * spec.bolt_separation / 2,
+                -spec.bolt_extra_length_into_bottom,
+            )
+        )
 
+        # Main bolt hole.
         plate_mount -= bd.Cylinder(
             radius=spec.bolt_diameter / 2 + spec.bolt_diameter_clearance / 2,
             height=spec.bolt_separation * 10,  # Arbitrary.
         ).translate((0, i * spec.bolt_separation / 2, 0))
+
+        # Bolt head.
+        plate_mount -= bd.Cylinder(
+            radius=9,
+            height=100,
+            align=(
+                bd.Align.CENTER,
+                bd.Align.CENTER,
+                bd.Align.MIN,
+            ),
+        ).translate(
+            (
+                0,
+                i * spec.bolt_separation / 2,
+                (spec.bolt_separation / 2)
+                - spec.bolt_extra_length_into_bottom,
+            )
+        )
+
     p += plate_mount.rotate(
         axis=bd.Axis.X, angle=spec.antenna_elevation_angle_degrees
     )
@@ -109,8 +139,8 @@ def main_mount_joined(spec: Spec) -> bd.Part | bd.Compound:
 
 if __name__ == "__main__":
     parts = {
-        # "main_mount_top": (main_mount_joined(Spec(make_type="top"))),
-        # "main_mount_bottom": (main_mount_joined(Spec(make_type="bottom"))),
+        "main_mount_top": show(main_mount_joined(Spec(make_type="top"))),
+        "main_mount_bottom": show(main_mount_joined(Spec(make_type="bottom"))),
         "preview_main_mount_joined": show(main_mount_joined(Spec())),
     }
 
