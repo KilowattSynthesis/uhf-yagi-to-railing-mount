@@ -570,7 +570,7 @@ def main_mount_assembly(spec: Spec, azimuth_deg: float) -> bd.Compound:
 
     bottom = clamp_half(spec, "bottom", rotate_for_printing=False)
     bottom.label = "main_mount_bottom"
-    bottom.color = bd.Color("magenta")
+    bottom.color = bd.Color("purple")
 
     # Compound -> Solid, so the color is kept in the STEP export.
     wedge_solid = antenna_wedge(spec).solid()
@@ -579,7 +579,7 @@ def main_mount_assembly(spec: Spec, azimuth_deg: float) -> bd.Compound:
         (0, 0, spec.clamp_top_z)
     )
     wedge.label = "antenna_wedge"
-    wedge.color = bd.Color("teal")
+    wedge.color = bd.Color("lightblue")
 
     return bd.Compound(
         label="main_mount_assembly", children=[top, bottom, wedge]
