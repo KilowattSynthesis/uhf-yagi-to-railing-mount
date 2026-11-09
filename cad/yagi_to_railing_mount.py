@@ -125,6 +125,27 @@ class Spec:
 
     # Through-holes parallel to the railing, for a safety rope.
     rope_hole_diameter: float = 7.0
+
+    # Tapered registration pegs on the top clamp half's split face, which
+    # fit into sockets in the bottom half. Tapered, so they self-center.
+    registration_peg_base_radius: float = 3.0
+    registration_peg_tip_radius: float = 1.5
+    registration_peg_height: float = 3.0
+    registration_clearance: float = 0.2  # On radius, and on depth.
+    # (x, y) centers on the split face, beside the railing.
+    registration_peg_positions: tuple[tuple[float, float], ...] = (
+        (10.0, 30.5),
+        (-10.0, 30.5),
+        (10.0, -30.5),
+        (-10.0, -30.5),
+    )
+
+    # Separate pin, between the turntable base and the wedge. Keeps the
+    # wedge centered while it's turned.
+    pivot_pin_diameter: float = 8.0
+    pivot_pin_length: float = 8.0
+    pivot_pin_clearance: float = 0.3  # On diameter.
+    pivot_pin_chamfer: float = 0.6
     # (y, z) centers, relative to the railing center.
     rope_hole_positions: tuple[tuple[float, float], ...] = (
         (22.5, 21.5),  # Top half.
@@ -393,6 +414,9 @@ def turntable_base_cutouts(
 
         p += feature.rotate(bd.Axis.Z, angle)
 
+    # Hole for the pivot pin.
+    p += pivot_pin_hole(spec).translate((0, 0, spec.clamp_top_z))
+
     # Azimuth marks on the rim. The 0 deg mark is wider.
     for azimuth in spec.azimuth_marks_degrees:
         p += (
@@ -434,6 +458,26 @@ def clamp_half(
 
     if half == "top":
         p -= turntable_base_cutouts(spec, p)
+
+    # Registration pegs on the top half (pointing down), and sockets in the
+    # bottom half.
+    for peg_x, peg_y in spec.registration_peg_positions:
+        if half == "top":
+            p += bd.Cone(
+                bottom_radius=spec.registration_peg_tip_radius,
+                top_radius=spec.registration_peg_base_radius,
+                height=spec.registration_peg_height,
+                align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX),
+            ).translate((peg_x, peg_y, 0))
+        else:
+            # Same taper, offset outward by the clearance.
+            clearance = spec.registration_clearance
+            p -= bd.Cone(
+                bottom_radius=spec.registration_peg_tip_radius + clearance,
+                top_radius=spec.registration_peg_base_radius + clearance,
+                height=spec.registration_peg_height + clearance,
+                align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX),
+            ).translate((peg_x, peg_y, 0))
 
     # Both halves print with their large flat face (the turntable base, or
     # the split face) on the bed.
@@ -557,9 +601,34 @@ def antenna_wedge(spec: Spec) -> bd.Part | bd.Compound:
         align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN),
     ).translate((0, spec.turntable_radius, 0))
 
+    p -= pivot_pin_hole(spec)
+
     p -= antenna_cutouts(spec, p)
 
     return p
+
+
+def pivot_pin_hole(spec: Spec) -> bd.Part | bd.Compound:
+    """Hole for half of the pivot pin, going down from Z=0 (and up)."""
+    return bd.Cylinder(
+        radius=(spec.pivot_pin_diameter + spec.pivot_pin_clearance) / 2,
+        # Extra depth so the pin never bottoms out.
+        height=(spec.pivot_pin_length / 2 + 0.5) * 2,
+    )
+
+
+def pivot_pin(spec: Spec) -> bd.Part | bd.Compound:
+    """Pin between the turntable base and the wedge, centered at Z=0.
+
+    Prints standing upright.
+    """
+    p = bd.Part() + bd.Cylinder(
+        radius=spec.pivot_pin_diameter / 2,
+        height=spec.pivot_pin_length,
+    )
+    return bd.chamfer(
+        p.edges().filter_by(bd.GeomType.CIRCLE), spec.pivot_pin_chamfer
+    )
 
 
 def main_mount_assembly(spec: Spec, azimuth_deg: float) -> bd.Compound:
@@ -581,8 +650,14 @@ def main_mount_assembly(spec: Spec, azimuth_deg: float) -> bd.Compound:
     wedge.label = "antenna_wedge"
     wedge.color = bd.Color("lightblue")
 
+    pin_solid = pivot_pin(spec).solid()
+    assert pin_solid is not None
+    pin = pin_solid.translate((0, 0, spec.clamp_top_z))
+    pin.label = "turntable_pivot_pin"
+    pin.color = bd.Color("orange")
+
     return bd.Compound(
-        label="main_mount_assembly", children=[top, bottom, wedge]
+        label="main_mount_assembly", children=[top, bottom, wedge, pin]
     )
 
 
@@ -594,6 +669,9 @@ if __name__ == "__main__":
         "main_mount_top": clamp_half(Spec(), "top"),
         "main_mount_bottom": clamp_half(Spec(), "bottom"),
         "antenna_wedge": antenna_wedge(Spec()),
+        "turntable_pivot_pin": pivot_pin(Spec()).translate(
+            (0, 0, Spec().pivot_pin_length / 2)
+        ),
         "preview_main_mount_assembly": main_mount_assembly(
             Spec(), SHOW_AZIMUTH_DEGREES
         ),
