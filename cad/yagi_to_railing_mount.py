@@ -53,9 +53,9 @@ M5 = MetricBolt("M5", 5.0, 8.5, 8.0, 4.0, 18.0)
 M6 = MetricBolt("M6", 6.0, 10.0, 10.0, 5.0, 20.0)
 
 # Change these to switch bolt sizes.
-ANTENNA_BOLT = M4  # Holds the antenna body to the wedge.
+ANTENNA_BOLT = M5  # Holds the antenna body to the wedge.
 CLAMP_BOLT = M5  # Clamps the top and bottom halves around the railing.
-TURNTABLE_BOLT = M4  # Holds the wedge to the turntable base.
+TURNTABLE_BOLT = M5  # Holds the wedge to the turntable base.
 
 
 @dataclass
@@ -97,7 +97,7 @@ class Spec:
     # Radius of the turntable bolts, and of the arc slots in the wedge.
     turntable_bolt_radius: float = 18.0
     # Depth from the base's top face to the center of the nut slot.
-    turntable_nut_depth: float = 6.0
+    turntable_nut_depth: float = 5.5
     # Extra arc length on each end of the wedge slots.
     turntable_slot_extra_degrees: float = 1.0
 
@@ -116,7 +116,7 @@ class Spec:
 
     antenna_body_width: float = 15.0
     antenna_body_recess_depth: float = 2.0
-    antenna_hole_sep: float = 46
+    antenna_hole_sep: float = 45
     # Shifts the antenna back along its face (away from the boom's pointing
     # direction), so the front bolt hole has room inside the wedge.
     antenna_face_offset: float = 7.0
