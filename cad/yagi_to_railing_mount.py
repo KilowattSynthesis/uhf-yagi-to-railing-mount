@@ -88,6 +88,17 @@ class Spec:
         default_factory=lambda: (-45.0, 0.0, 45.0)
     )
 
+    # Through-holes parallel to the railing, for a safety rope.
+    rope_hole_diameter: float = 7.0
+    # (y, z) centers in the plate frame (before the elevation rotation).
+    # Positioned for >=3 mm walls to the railing, bolts, and outer faces.
+    rope_hole_positions: tuple[tuple[float, float], ...] = (
+        (21.0, 18.0),  # Top half.
+        (-28.0, 17.5),  # Top half. Tight: ~3 mm walls.
+        (-18.0, -14.0),  # Bottom half.
+        (0.0, -26.0),  # Bottom half.
+    )
+
     make_type: Literal["full", "top", "bottom"] = "full"
 
     def __post_init__(self) -> None:
@@ -320,6 +331,18 @@ def main_mount_joined(
         spec.railing_height,
         align=bd.Align.CENTER,
     )
+
+    # Safety rope holes, through the full width.
+    for rope_y, rope_z in spec.rope_hole_positions:
+        p -= (
+            bd.Cylinder(
+                radius=spec.rope_hole_diameter / 2,
+                height=spec.antenna_pad_radius * 4,  # Arbitrary.
+            )
+            .rotate(axis=bd.Axis.Y, angle=90)
+            .translate((0, rope_y, rope_z))
+            .rotate(axis=bd.Axis.X, angle=spec.antenna_elevation_angle_degrees)
+        )
 
     # Apply the make type.
     if spec.make_type == "full":
