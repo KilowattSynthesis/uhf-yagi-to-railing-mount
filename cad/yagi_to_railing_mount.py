@@ -92,7 +92,7 @@ class Spec:
     clamp_bolt_boss_wall: float = 2.2  # Around the nut's corners.
 
     # Turntable: shared by the base (on the top clamp half) and the wedge.
-    turntable_radius: float = 28.0
+    turntable_radius: float = 32.0
     turntable_base_thickness: float = 10.0
     # Radius of the turntable bolts, and of the arc slots in the wedge.
     turntable_bolt_radius: float = 18.0
@@ -109,7 +109,7 @@ class Spec:
     mark_depth: float = 1.0
 
     # Thickness of the wedge at its lowest point (the back).
-    wedge_min_height: float = 12.0
+    wedge_min_height: float = 10.0
     # Material under the turntable bolt heads, in the wedge.
     wedge_bolt_ledge_thickness: float = 6.0
     wedge_bolt_head_clearance: float = 1.0
@@ -122,9 +122,23 @@ class Spec:
     antenna_face_offset: float = 7.0
     # From the recess floor to the center of the antenna nut slot.
     antenna_nut_depth: float = 6.0
+    # Thickness of the antenna's mounting bracket, under the bolt heads.
+    # Only used for the hardware BOM. Measure yours.
+    antenna_bracket_thickness: float = 3.0
+
+    # How far a clamp bolt may stick out past its nut (below the clamp).
+    clamp_bolt_max_protrusion: float = 10.0
 
     # Through-holes parallel to the railing, for a safety rope.
     rope_hole_diameter: float = 7.0
+
+    # Safety rope holes through the wedge, along its X axis (parallel to
+    # the yagi elements), in the tall front part. (y, z) centers in the
+    # wedge frame (bottom at Z=0, antenna pointing +Y).
+    wedge_rope_hole_positions: tuple[tuple[float, float], ...] = (
+        (24.0, 8.0),
+        (24.0, 18.5),
+    )
 
     # Tapered registration pegs on the top clamp half's split face, which
     # fit into sockets in the bottom half. Tapered, so they self-center.
@@ -172,11 +186,10 @@ class Spec:
             self.turntable_bolt_radius + self.wedge_slot_head_width / 2
             < self.turntable_radius
         )
-        # Wedge must be clear of the clamp bolt head counterbores.
+        # Wedge must be clear of the clamp bolt heads (hex key access).
         assert (
             self.turntable_radius
-            < self.bolt_separation / 2
-            - self.clamp_bolt.head_counterbore_diameter / 2
+            < self.bolt_separation / 2 - self.clamp_bolt.head_diameter / 2 - 1
         )
 
     @property
@@ -285,6 +298,81 @@ def max_hole_depth(  # noqa: PLR0913
     return depth
 
 
+def cached_hole_depth(spec: Spec, name: str) -> float:
+    """Get a hole depth found by `max_hole_depth`, after the part is built."""
+    return _hole_depth_cache[(repr(spec), name)]
+
+
+# Common ISO 4762 socket head bolt lengths.
+STANDARD_BOLT_LENGTHS = (
+    *(6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40),
+    *(45, 50, 55, 60, 65, 70, 75, 80, 90, 100),
+)
+
+
+def bolt_bom(spec: Spec) -> list[str]:
+    """List the bolts needed, with the usable range of lengths.
+
+    Call after building the parts, so the hole depths are known.
+    """
+
+    def bolt_line(
+        count: int, bolt: MetricBolt, min_len: float, max_len: float, use: str
+    ) -> str:
+        fits = [
+            length
+            for length in STANDARD_BOLT_LENGTHS
+            if min_len <= length <= max_len
+        ]
+        sizes = ", ".join(f"{bolt.name}x{length}" for length in fits)
+        return (
+            f"{count}x {sizes or 'NONE'} "
+            f"({math.ceil(min_len)}-{math.floor(max_len)} mm, {use})"
+        )
+
+    # Shortest bolt engages the full nut; longest is limited by the blind
+    # hole depth (or by protrusion, for the clamp bolts).
+    clamp_nut_far_face = spec.bolt_extra_length_into_bottom - (
+        spec.clamp_nut_clearance
+    )
+    clamp_min = spec.clamp_top_z + clamp_nut_far_face
+    clamp_max = (
+        spec.clamp_top_z
+        + spec.bolt_extra_length_into_bottom
+        + spec.clamp_bolt_max_protrusion
+    )
+
+    tt = spec.turntable_bolt
+    tt_depth = min(
+        cached_hole_depth(spec, f"Turntable base bolt hole at {angle} deg")
+        for angle in (45, 135, 225, 315)
+    )
+    tt_min = (
+        spec.wedge_bolt_ledge_thickness
+        + spec.turntable_nut_depth
+        + (tt.nut_thickness + spec.nut_clearance) / 2
+    )
+    tt_max = spec.wedge_bolt_ledge_thickness + tt_depth
+
+    ant = spec.antenna_bolt
+    ant_depth = min(
+        cached_hole_depth(spec, f"Antenna bolt hole, {end}")
+        for end in ("front", "back")
+    )
+    ant_min = (
+        spec.antenna_bracket_thickness
+        + spec.antenna_nut_depth
+        + (ant.nut_thickness + spec.nut_clearance) / 2
+    )
+    ant_max = spec.antenna_bracket_thickness + ant_depth
+
+    return [
+        bolt_line(2, spec.clamp_bolt, clamp_min, clamp_max, "clamp"),
+        bolt_line(2, tt, tt_min, tt_max, "turntable"),
+        bolt_line(2, ant, ant_min, ant_max, "antenna"),
+    ]
+
+
 def clamp_body(spec: Spec) -> bd.Part | bd.Compound:
     """Both clamp halves joined, without the turntable base holes."""
     p = bd.Part(None)
@@ -308,14 +396,15 @@ def clamp_body(spec: Spec) -> bd.Part | bd.Compound:
         align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX),
     ).translate((0, 0, spec.clamp_top_z))
 
-    # Clamp bolt bosses, holes, heads, and captive nuts.
+    # Clamp bolt bosses, holes, and captive nuts. The bosses go up to the
+    # top face, so the bolt heads sit level with it (no counterbore, so no
+    # overhang when printing the top half upside down).
     for i in (-1, 1):
         y = i * spec.bolt_separation / 2
-        bolt_head_z = spec.clamp_top_z - spec.bolt_extra_length_into_bottom
 
         p += bd.Cylinder(
             radius=spec.clamp_bolt_boss_radius,
-            height=bolt_head_z + spec.bolt_extra_length_into_bottom,
+            height=spec.clamp_top_z + spec.bolt_extra_length_into_bottom,
             align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN),
         ).translate((0, y, -spec.bolt_extra_length_into_bottom))
 
@@ -324,13 +413,6 @@ def clamp_body(spec: Spec) -> bd.Part | bd.Compound:
             radius=(spec.clamp_bolt.diameter + spec.bolt_hole_clearance) / 2,
             height=spec.bolt_separation * 10,  # Arbitrary.
         ).translate((0, y, 0))
-
-        # Bolt head.
-        p -= bd.Cylinder(
-            radius=spec.clamp_bolt.head_counterbore_diameter / 2,
-            height=100,
-            align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN),
-        ).translate((0, y, bolt_head_z))
 
         # Captive nut, pressed in from the bottom of the boss.
         nut_thick = spec.clamp_bolt.nut_thickness + spec.clamp_nut_clearance
@@ -574,6 +656,17 @@ def antenna_wedge(spec: Spec) -> bd.Part | bd.Compound:
         )
     )
 
+    # Safety rope holes, through the full width.
+    for rope_y, rope_z in spec.wedge_rope_hole_positions:
+        p -= (
+            bd.Cylinder(
+                radius=spec.rope_hole_diameter / 2,
+                height=spec.turntable_radius * 3,  # Arbitrary.
+            )
+            .rotate(axis=bd.Axis.Y, angle=90)
+            .translate((0, rope_y, rope_z))
+        )
+
     # Arc slots for the turntable bolts, centered on the +/-X axis (away from
     # the antenna boom), each spanning 90 deg.
     slot_extra = spec.turntable_slot_extra_degrees
@@ -689,6 +782,10 @@ if __name__ == "__main__":
 
         bd.export_stl(part, str(export_folder / f"{name}.stl"))
         bd.export_step(part, str(export_folder / f"{name}.step"))
+
+    logger.info(
+        "Bolts:\n" + "\n".join(f"  {line}" for line in bolt_bom(Spec()))
+    )
 
     logger.info(f"Showing assembly (azimuth {SHOW_AZIMUTH_DEGREES} deg)")
     show(parts["preview_main_mount_assembly"])
