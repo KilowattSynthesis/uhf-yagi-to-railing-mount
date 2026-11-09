@@ -4,7 +4,6 @@
         "tamasfe.even-better-toml",
         "charliermarsh.ruff",
         "mtsmfm.vscode-stl-viewer",
-        "ms-python.python",
-        "gruntfuggly.todo-tree"
+        "ms-python.python"
     ]
 }
