@@ -122,9 +122,9 @@ class Spec:
     antenna_face_offset: float = 7.0
     # From the recess floor to the center of the antenna nut slot.
     antenna_nut_depth: float = 6.0
-    # Thickness of the antenna's mounting bracket, under the bolt heads.
-    # Only used for the hardware BOM. Measure yours.
-    antenna_bracket_thickness: float = 3.0
+    # Height of the antenna under the bolt heads (the bolts pass through
+    # both walls of the 15 mm square boom). Only used for the bolt BOM.
+    antenna_bracket_thickness: float = 15.0
 
     # How far a clamp bolt may stick out past its nut (below the clamp).
     clamp_bolt_max_protrusion: float = 10.0
