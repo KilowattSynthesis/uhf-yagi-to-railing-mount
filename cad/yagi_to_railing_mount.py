@@ -1,5 +1,5 @@
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, assert_never
 
@@ -212,8 +212,14 @@ def antenna_bolt_cutouts(
     return p.rotate(bd.Axis.Z, angle_deg)
 
 
-def main_mount_joined(spec: Spec) -> bd.Part | bd.Compound:
-    """Create a CAD model of part."""
+def main_mount_joined(
+    spec: Spec, *, rotate_for_printing: bool = True
+) -> bd.Part | bd.Compound:
+    """Create a CAD model of part.
+
+    With `rotate_for_printing=False`, the part stays in its assembled
+    position.
+    """
     p = bd.Part(None)
 
     # Create the main body.
@@ -334,7 +340,7 @@ def main_mount_joined(spec: Spec) -> bd.Part | bd.Compound:
         assert_never(spec.make_type)
 
     # Rotate for easy printing.
-    if spec.make_type == "top":
+    if rotate_for_printing and spec.make_type == "top":
         p = p.rotate(
             axis=bd.Axis.X, angle=180 - spec.antenna_elevation_angle_degrees
         )
@@ -342,11 +348,31 @@ def main_mount_joined(spec: Spec) -> bd.Part | bd.Compound:
     return p
 
 
+def main_mount_assembly(spec: Spec) -> bd.Compound:
+    """Create the assembled top and bottom halves, as named parts."""
+    top = main_mount_joined(
+        replace(spec, make_type="top"), rotate_for_printing=False
+    )
+    top.label = "main_mount_top"
+    top.color = bd.Color("navyblue")
+
+    bottom = main_mount_joined(
+        replace(spec, make_type="bottom"), rotate_for_printing=False
+    )
+    bottom.label = "main_mount_bottom"
+    bottom.color = bd.Color("magenta")
+
+    return bd.Compound(label="main_mount_assembly", children=[top, bottom])
+
+
 if __name__ == "__main__":
     angle_variants: dict[str, tuple[float, ...]] = {
         "az45": (-45.0, 0.0, 45.0),
         "az60": (-60.0, 0.0, 60.0),
     }
+    # Which variant's assembly to show in the viewer.
+    SHOW_VARIANT = "az45"
+    assert SHOW_VARIANT in angle_variants
 
     for variant_name, angles in angle_variants.items():
         for angle in angles:
@@ -358,20 +384,16 @@ if __name__ == "__main__":
                 f"true azimuth {az:+.1f} deg, elevation {el:.1f} deg"
             )
 
-    parts: dict[str, bd.Part | bd.Compound | None] = {
-        "main_mount_bottom": show(main_mount_joined(Spec(make_type="bottom")))
+    parts: dict[str, bd.Part | bd.Compound] = {
+        "main_mount_bottom": main_mount_joined(Spec(make_type="bottom"))
     }
     for variant_name, angles in angle_variants.items():
-        parts[f"main_mount_top_{variant_name}"] = show(
-            main_mount_joined(
-                Spec(make_type="top", antenna_azimuth_angles_degrees=angles)
-            )
+        parts[f"main_mount_top_{variant_name}"] = main_mount_joined(
+            Spec(make_type="top", antenna_azimuth_angles_degrees=angles)
         )
-        parts[f"preview_main_mount_joined_{variant_name}"] = show(
-            main_mount_joined(Spec(antenna_azimuth_angles_degrees=angles))
+        parts[f"preview_main_mount_assembly_{variant_name}"] = (
+            main_mount_assembly(Spec(antenna_azimuth_angles_degrees=angles))
         )
-
-    logger.info("Showing CAD model(s)")
 
     (export_folder := Path(__file__).parent.with_name("build")).mkdir(
         exist_ok=True
@@ -385,3 +407,6 @@ if __name__ == "__main__":
 
         bd.export_stl(part, str(export_folder / f"{name}.stl"))
         bd.export_step(part, str(export_folder / f"{name}.step"))
+
+    logger.info(f"Showing assembly ({SHOW_VARIANT})")
+    show(parts[f"preview_main_mount_assembly_{SHOW_VARIANT}"])
