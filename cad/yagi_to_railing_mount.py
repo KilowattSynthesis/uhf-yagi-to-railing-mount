@@ -70,7 +70,9 @@ class Spec:
     antenna_hole_sep: float = 46
 
     # Antenna bolts + nuts holding the antenna body to the plate.
-    antenna_bolt_hole_depth: float = 12.0  # Below the recess floor.
+    # Each hole is made as deep as possible, while keeping this much
+    # material between it and any other feature or outer surface.
+    antenna_bolt_hole_min_wall: float = 1.5
     antenna_nut_clearance: float = 0.4
     # From the recess floor to the center of the nut slot.
     antenna_nut_depth: float = 6.0
@@ -81,6 +83,8 @@ class Spec:
     # rotated antenna bolt holes and the railing. Does not change the
     # clamp bolt length.
     antenna_pad_raise: float = 8.0
+    # Total thickness of the pad, from its top surface.
+    antenna_pad_thickness: float = 23.0
 
     # Rotation of the antenna about the plate normal, for each mounting
     # position. 0 is pointing straight out from the railing.
@@ -103,7 +107,13 @@ class Spec:
 
     def __post_init__(self) -> None:
         """Post initialization checks."""
-        assert self.antenna_nut_depth < self.antenna_bolt_hole_depth
+        # Antenna nut slot must fit within the pad.
+        assert (
+            self.antenna_body_recess_depth
+            + self.antenna_nut_depth
+            + self.antenna_bolt.nut_thickness
+            < self.antenna_pad_thickness
+        )
         # Leave material above the antenna nut slot.
         assert (
             self.antenna_nut_depth
@@ -168,13 +178,67 @@ def hex_nut_pocket(
     )
 
 
+_antenna_hole_depth_cache: dict[tuple[str, float, float], float] = {}
+
+
+def antenna_hole_depth(
+    spec: Spec, body: bd.Part | bd.Compound, x: float, y: float
+) -> float:
+    """Find the deepest antenna bolt hole (below the recess floor).
+
+    Keeps `antenna_bolt_hole_min_wall` of material around the hole, within
+    `body` (world frame, no antenna cutouts). `x` and `y` are the hole
+    position in the plate frame.
+    """
+    cache_key = (
+        repr(replace(spec, make_type="full")),
+        round(x, 3),
+        round(y, 3),
+    )
+    if cache_key in _antenna_hole_depth_cache:
+        return _antenna_hole_depth_cache[cache_key]
+
+    wall = spec.antenna_bolt_hole_min_wall
+    probe_radius = (
+        spec.antenna_bolt.diameter + spec.bolt_hole_clearance
+    ) / 2 + wall
+
+    def fits(depth: float) -> bool:
+        probe = (
+            bd.Cylinder(
+                radius=probe_radius,
+                height=depth + wall,
+                align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX),
+            )
+            .translate((x, y, spec.recess_floor_z))
+            .rotate(axis=bd.Axis.X, angle=spec.antenna_elevation_angle_degrees)
+        )
+        outside = probe - body
+        return outside.volume < 1e-3  # noqa: PLR2004
+
+    # Binary search. The nut slot sets the minimum.
+    low = spec.antenna_nut_depth + spec.antenna_bolt.nut_thickness
+    high = spec.recess_floor_z
+    assert fits(low), f"No room for antenna bolt hole at ({x:.1f}, {y:.1f})"
+    while high - low > 0.1:  # noqa: PLR2004
+        mid = (low + high) / 2
+        if fits(mid):
+            low = mid
+        else:
+            high = mid
+
+    depth = math.floor(low * 2) / 2  # Round down to 0.5 mm.
+    _antenna_hole_depth_cache[cache_key] = depth
+    return depth
+
+
 def antenna_bolt_cutouts(
-    spec: Spec, angle_deg: float
+    spec: Spec, angle_deg: float, body: bd.Part | bd.Compound
 ) -> bd.Part | bd.Compound:
     """Recess channel, bolt holes, and side-entry nut slots at one angle.
 
     Built in the plate frame with the antenna along Y, then rotated about
-    the plate normal (Z).
+    the plate normal (Z). `body` is used to find the bolt hole depths.
     """
     p = bd.Part(None)
 
@@ -194,10 +258,12 @@ def antenna_bolt_cutouts(
     for i in (-1, 1):
         y = i * spec.antenna_hole_sep / 2
 
-        # Bolt hole.
+        # Bolt hole, as deep as it can go.
+        rotated = bd.Vector(0, y, 0).rotate(bd.Axis.Z, angle_deg)
+        depth = antenna_hole_depth(spec, body, rotated.X, rotated.Y)
         p += bd.Cylinder(
             radius=(bolt.diameter + spec.bolt_hole_clearance) / 2,
-            height=spec.antenna_bolt_hole_depth + 1,
+            height=depth + 1,
             align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX),
         ).translate((0, y, spec.recess_floor_z + 1))
 
@@ -221,6 +287,22 @@ def antenna_bolt_cutouts(
         ).translate((0, y, nut_z))
 
     return p.rotate(bd.Axis.Z, angle_deg)
+
+
+def _split_cutter(
+    spec: Spec, keep: Literal["top", "bottom"]
+) -> bd.Part | bd.Compound:
+    """Solid to subtract, to keep only the `keep` half (world frame)."""
+    return bd.Box(
+        spec.antenna_pad_radius * 4,
+        spec.bolt_separation * 5,
+        spec.bolt_separation * 5,
+        align=(
+            bd.Align.CENTER,
+            bd.Align.CENTER,
+            {"bottom": bd.Align.MIN, "top": bd.Align.MAX}[keep],
+        ),
+    ).rotate(axis=bd.Axis.X, angle=spec.antenna_elevation_angle_degrees)
 
 
 def main_mount_joined(
@@ -252,12 +334,9 @@ def main_mount_joined(
     )
 
     # Round pad, wide enough for the rotated antenna hole patterns.
-    pad_height = (
-        spec.antenna_body_recess_depth + spec.antenna_bolt_hole_depth + 2
-    )
     plate_mount += bd.Cylinder(
         radius=spec.antenna_pad_radius,
-        height=pad_height,
+        height=spec.antenna_pad_thickness,
         align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX),
     ).translate((0, 0, spec.pad_top_z))
 
@@ -278,10 +357,6 @@ def main_mount_joined(
                 -spec.bolt_extra_length_into_bottom,
             )
         )
-
-    # Antenna mounting cutouts (bolts + nuts), at each angle.
-    for angle in spec.antenna_azimuth_angles_degrees:
-        plate_mount -= antenna_bolt_cutouts(spec, angle)
 
     # Clamp bolt holes, heads, and captive nuts.
     for i in (-1, 1):
@@ -344,20 +419,21 @@ def main_mount_joined(
             .rotate(axis=bd.Axis.X, angle=spec.antenna_elevation_angle_degrees)
         )
 
+    # Antenna mounting cutouts (bolts + nuts), at each angle. Not needed
+    # for the bottom half.
+    if spec.make_type != "bottom":
+        # Top half, without the antenna cutouts. Used to size the holes.
+        top_body = p - _split_cutter(spec, "top")
+        for angle in spec.antenna_azimuth_angles_degrees:
+            p -= antenna_bolt_cutouts(spec, angle, top_body).rotate(
+                axis=bd.Axis.X, angle=spec.antenna_elevation_angle_degrees
+            )
+
     # Apply the make type.
     if spec.make_type == "full":
         pass
     elif spec.make_type in ("top", "bottom"):
-        p -= bd.Box(
-            spec.antenna_pad_radius * 4,
-            spec.bolt_separation * 5,
-            spec.bolt_separation * 5,
-            align=(
-                bd.Align.CENTER,
-                bd.Align.CENTER,
-                {"bottom": bd.Align.MIN, "top": bd.Align.MAX}[spec.make_type],
-            ),
-        ).rotate(axis=bd.Axis.X, angle=spec.antenna_elevation_angle_degrees)
+        p -= _split_cutter(spec, spec.make_type)
 
     else:
         assert_never(spec.make_type)
@@ -390,7 +466,8 @@ def main_mount_assembly(spec: Spec) -> bd.Compound:
 
 if __name__ == "__main__":
     angle_variants: dict[str, tuple[float, ...]] = {
-        "az45": (-45.0, 0.0, 45.0),
+        # 90 deg also covers -90 deg (same holes, antenna flipped).
+        "az45": (-45.0, 0.0, 45.0, 90.0),
         "az60": (-60.0, 0.0, 60.0),
     }
     # Which variant's assembly to show in the viewer.
@@ -405,6 +482,26 @@ if __name__ == "__main__":
             logger.info(
                 f"{variant_name}: plate rotation {angle:+.0f} deg -> "
                 f"true azimuth {az:+.1f} deg, elevation {el:.1f} deg"
+            )
+
+    for variant_name, angles in angle_variants.items():
+        spec = Spec(antenna_azimuth_angles_degrees=angles)
+        top_body = main_mount_joined(
+            replace(spec, make_type="top", antenna_azimuth_angles_degrees=()),
+            rotate_for_printing=False,
+        )
+        for angle in angles:
+            depths = []
+            for i in (-1, 1):
+                hole = bd.Vector(0, i * spec.antenna_hole_sep / 2, 0).rotate(
+                    bd.Axis.Z, angle
+                )
+                depths.append(
+                    antenna_hole_depth(spec, top_body, hole.X, hole.Y)
+                )
+            logger.info(
+                f"{variant_name}: plate rotation {angle:+.0f} deg -> "
+                f"antenna bolt hole depths {depths} mm below recess floor"
             )
 
     parts: dict[str, bd.Part | bd.Compound] = {
