@@ -182,21 +182,29 @@ _antenna_hole_depth_cache: dict[tuple[str, float, float], float] = {}
 
 
 def antenna_hole_depth(
-    spec: Spec, body: bd.Part | bd.Compound, x: float, y: float
+    spec: Spec, body: bd.Part | bd.Compound, angle_deg: float, y: float
 ) -> float:
     """Find the deepest antenna bolt hole (below the recess floor).
 
     Keeps `antenna_bolt_hole_min_wall` of material around the hole, within
-    `body` (world frame, no antenna cutouts). `x` and `y` are the hole
-    position in the plate frame.
+    `body` (world frame, no antenna cutouts). The hole is at `y` along the
+    antenna, which is rotated by `angle_deg` about the plate normal.
+
+    Each result is cached and logged the first time it's computed.
     """
     cache_key = (
-        repr(replace(spec, make_type="full")),
-        round(x, 3),
+        # The body doesn't depend on the make type or antenna angles.
+        repr(
+            replace(spec, make_type="full", antenna_azimuth_angles_degrees=())
+        ),
+        round(angle_deg, 3),
         round(y, 3),
     )
     if cache_key in _antenna_hole_depth_cache:
         return _antenna_hole_depth_cache[cache_key]
+
+    hole = bd.Vector(0, y, 0).rotate(bd.Axis.Z, angle_deg)
+    x, y = hole.X, hole.Y
 
     wall = spec.antenna_bolt_hole_min_wall
     probe_radius = (
@@ -229,6 +237,11 @@ def antenna_hole_depth(
 
     depth = math.floor(low * 2) / 2  # Round down to 0.5 mm.
     _antenna_hole_depth_cache[cache_key] = depth
+    logger.info(
+        f"Antenna bolt hole at {angle_deg:+.0f} deg, "
+        f"{'front' if cache_key[2] > 0 else 'back'}: "
+        f"{depth} mm deep below recess floor"
+    )
     return depth
 
 
@@ -259,8 +272,7 @@ def antenna_bolt_cutouts(
         y = i * spec.antenna_hole_sep / 2
 
         # Bolt hole, as deep as it can go.
-        rotated = bd.Vector(0, y, 0).rotate(bd.Axis.Z, angle_deg)
-        depth = antenna_hole_depth(spec, body, rotated.X, rotated.Y)
+        depth = antenna_hole_depth(spec, body, angle_deg, y)
         p += bd.Cylinder(
             radius=(bolt.diameter + spec.bolt_hole_clearance) / 2,
             height=depth + 1,
@@ -471,7 +483,7 @@ if __name__ == "__main__":
         "az60": (-60.0, 0.0, 60.0),
     }
     # Which variant's assembly to show in the viewer.
-    SHOW_VARIANT = "az45"
+    SHOW_VARIANT = "az60"
     assert SHOW_VARIANT in angle_variants
 
     for variant_name, angles in angle_variants.items():
@@ -482,26 +494,6 @@ if __name__ == "__main__":
             logger.info(
                 f"{variant_name}: plate rotation {angle:+.0f} deg -> "
                 f"true azimuth {az:+.1f} deg, elevation {el:.1f} deg"
-            )
-
-    for variant_name, angles in angle_variants.items():
-        spec = Spec(antenna_azimuth_angles_degrees=angles)
-        top_body = main_mount_joined(
-            replace(spec, make_type="top", antenna_azimuth_angles_degrees=()),
-            rotate_for_printing=False,
-        )
-        for angle in angles:
-            depths = []
-            for i in (-1, 1):
-                hole = bd.Vector(0, i * spec.antenna_hole_sep / 2, 0).rotate(
-                    bd.Axis.Z, angle
-                )
-                depths.append(
-                    antenna_hole_depth(spec, top_body, hole.X, hole.Y)
-                )
-            logger.info(
-                f"{variant_name}: plate rotation {angle:+.0f} deg -> "
-                f"antenna bolt hole depths {depths} mm below recess floor"
             )
 
     parts: dict[str, bd.Part | bd.Compound] = {
